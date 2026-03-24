@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sciaudit.evaluator import EvaluationReport
 from sciaudit.models import AuditReport, Severity, VerificationResult, VerificationStatus
 
 # Status to emoji/icon mapping for HTML
@@ -313,6 +314,159 @@ function filterResults(severity) {{
     }});
 }}
 </script>
+</body>
+</html>"""
+
+    Path(output_path).write_text(html, encoding="utf-8")
+
+
+def generate_evaluation_html(
+    report: EvaluationReport, doc_title: str, output_path: str | Path
+) -> None:
+    """Generate an HTML evaluation report showing venue-standard compliance."""
+    report.compute_overall()
+
+    # Grade color
+    grade_colors = {"A": "#22c55e", "B": "#3b82f6", "C": "#f59e0b", "D": "#f97316", "F": "#ef4444"}
+    grade_color = grade_colors.get(report.overall_grade, "#6b7280")
+
+    # Build dimension cards
+    dim_cards = ""
+    for d in report.dimensions:
+        bar_width = (d.score / d.max_score) * 100
+        if d.score >= 4:
+            bar_color = "#22c55e"
+        elif d.score >= 3:
+            bar_color = "#3b82f6"
+        elif d.score >= 2:
+            bar_color = "#f59e0b"
+        else:
+            bar_color = "#ef4444"
+
+        findings_html = ""
+        if d.findings:
+            items = "".join(f"<li>{f}</li>" for f in d.findings)
+            findings_html = f'<div class="findings"><strong>Findings:</strong><ul>{items}</ul></div>'
+
+        recs_html = ""
+        if d.recommendations:
+            items = "".join(f"<li>{r}</li>" for r in d.recommendations)
+            recs_html = f'<div class="recs"><strong>Recommendations:</strong><ul>{items}</ul></div>'
+
+        dim_cards += f"""
+        <div class="dim-card">
+            <div class="dim-header">
+                <span class="dim-name">{d.name}</span>
+                <span class="dim-score" style="color:{bar_color}">{d.score}/{d.max_score}</span>
+            </div>
+            <div class="score-bar-bg">
+                <div class="score-bar" style="width:{bar_width}%;background:{bar_color}"></div>
+            </div>
+            {findings_html}
+            {recs_html}
+        </div>"""
+
+    # Blockers
+    blockers_html = ""
+    if report.blockers:
+        items = "".join(f"<li>{b}</li>" for b in report.blockers)
+        blockers_html = f"""
+        <div class="blockers">
+            <h2>Submission Blockers</h2>
+            <ul>{items}</ul>
+        </div>"""
+
+    # Ready badge
+    ready_text = "READY" if report.ready_for_submission else "NOT READY"
+    ready_color = "#22c55e" if report.ready_for_submission else "#ef4444"
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SciAudit Evaluation — {doc_title}</title>
+<style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }}
+    .container {{ max-width: 900px; margin: 0 auto; }}
+    h1 {{ font-size: 1.5rem; margin-bottom: 0.3rem; color: #f8fafc; }}
+    h2 {{ font-size: 1.1rem; margin: 1.5rem 0 0.75rem; color: #94a3b8; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }}
+    .subtitle {{ color: #64748b; font-size: 0.85rem; margin-bottom: 1.5rem; }}
+
+    .top-summary {{
+        display: flex; gap: 1.5rem; align-items: center; margin-bottom: 2rem;
+        background: #1e293b; border-radius: 12px; padding: 1.5rem;
+    }}
+    .grade-circle {{
+        width: 80px; height: 80px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 2.5rem; font-weight: 800; color: {grade_color};
+        border: 3px solid {grade_color};
+    }}
+    .summary-text {{ flex: 1; }}
+    .summary-text .venue {{ font-size: 0.85rem; color: #94a3b8; }}
+    .summary-text .score-line {{ font-size: 1.1rem; margin: 0.3rem 0; }}
+    .ready-badge {{
+        display: inline-block; padding: 0.3rem 0.8rem; border-radius: 4px;
+        font-size: 0.8rem; font-weight: 700; color: white;
+        background: {ready_color};
+    }}
+
+    .dim-card {{
+        background: #1e293b; border-radius: 8px; padding: 1rem;
+        margin-bottom: 1rem;
+    }}
+    .dim-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }}
+    .dim-name {{ font-weight: 600; }}
+    .dim-score {{ font-size: 1.2rem; font-weight: 700; }}
+    .score-bar-bg {{
+        height: 6px; background: #334155; border-radius: 3px; overflow: hidden;
+    }}
+    .score-bar {{ height: 100%; border-radius: 3px; transition: width 0.3s; }}
+    .findings, .recs {{ margin-top: 0.75rem; font-size: 0.85rem; }}
+    .findings {{ color: #f59e0b; }}
+    .recs {{ color: #60a5fa; }}
+    .findings ul, .recs ul {{ margin-left: 1.2rem; margin-top: 0.3rem; }}
+    .findings li, .recs li {{ margin-bottom: 0.25rem; }}
+
+    .blockers {{
+        background: #451a03; border: 1px solid #92400e; border-radius: 8px;
+        padding: 1rem; margin-bottom: 1.5rem;
+    }}
+    .blockers h2 {{ color: #fbbf24; border: none; margin: 0 0 0.5rem; padding: 0; font-size: 1rem; }}
+    .blockers ul {{ margin-left: 1.2rem; color: #fcd34d; font-size: 0.9rem; }}
+
+    @media print {{
+        body {{ background: white; color: black; }}
+        .dim-card, .top-summary {{ background: #f8fafc; }}
+        .score-bar-bg {{ background: #e2e8f0; }}
+    }}
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>Journal Readiness Evaluation</h1>
+    <div class="subtitle">
+        Document: <strong>{doc_title}</strong> |
+        Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} |
+        sciaudit v0.1.0
+    </div>
+
+    <div class="top-summary">
+        <div class="grade-circle">{report.overall_grade}</div>
+        <div class="summary-text">
+            <div class="venue">Target: {report.venue_profile}</div>
+            <div class="score-line">Overall Score: <strong>{report.overall_score:.0%}</strong></div>
+            <span class="ready-badge">{ready_text} for submission</span>
+        </div>
+    </div>
+
+    {blockers_html}
+
+    <h2>Dimension Scores</h2>
+    {dim_cards}
+</div>
 </body>
 </html>"""
 

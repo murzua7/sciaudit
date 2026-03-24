@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from sciaudit.evaluator import EvaluationReport, evaluate_document
 from sciaudit.extractor import extract_claims_from_document
 from sciaudit.models import AuditReport, Claim, ClaimType, VerificationResult, VerificationStatus, Severity
 from sciaudit.parsers.html_parser import ParsedDocument, parse_html
 from sciaudit.parsers.markdown_parser import parse_markdown
-from sciaudit.report import generate_html_report, generate_json_report
+from sciaudit.report import generate_evaluation_html, generate_html_report, generate_json_report
 from sciaudit.verifiers.citation import CitationVerifier
 from sciaudit.verifiers.data import DataVerifier
 
@@ -82,7 +83,8 @@ async def run_audit(
     fred_api_key: str = "",
     email: str = "sciaudit@verification.local",
     concurrency: int = 5,
-) -> AuditReport:
+    venue: str = "",
+) -> tuple[AuditReport, EvaluationReport | None]:
     """Run a complete audit on a document.
 
     Args:
@@ -91,9 +93,11 @@ async def run_audit(
         fred_api_key: FRED API key.
         email: Email for Crossref.
         concurrency: Max concurrent API calls.
+        venue: Target venue for quality evaluation (e.g., "neurips", "aer", "general").
+            Empty string skips evaluation.
 
     Returns:
-        AuditReport with all results.
+        Tuple of (AuditReport, EvaluationReport or None).
     """
     document_path = Path(document_path)
     if output_dir is None:
@@ -120,9 +124,16 @@ async def run_audit(
     )
     report.compute_summary()
 
-    # 5. Generate outputs
+    # 5. Quality evaluation (if venue specified)
+    eval_report = None
+    if venue:
+        eval_report = evaluate_document(doc, venue=venue)
+
+    # 6. Generate outputs
     stem = document_path.stem
     generate_html_report(report, output_dir / f"{stem}_audit.html")
     generate_json_report(report, output_dir / f"{stem}_audit.json")
+    if eval_report:
+        generate_evaluation_html(eval_report, doc.title, output_dir / f"{stem}_evaluation.html")
 
-    return report
+    return report, eval_report
